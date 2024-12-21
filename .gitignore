@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[cod]
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+.env
+.env.local
+
+# Mac OS
+.DS_Store
+
+# helper files
+base-server.py
+llms-full.txt
