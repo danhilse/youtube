@@ -109,7 +109,8 @@ class ResearchTool:
                                             comments
                                         )
                                     }
-                                }]
+                                }], 
+                                max_token=900
                             )
                             video_summaries.append(
                                 json.loads(summary_resp.content.text)
@@ -130,7 +131,8 @@ class ResearchTool:
                                 video_summaries
                             )
                         }
-                    }]
+                    }],
+                    max_tokens=900
                 )
                 
                 assessment = json.loads(assessment_resp.content.text)
@@ -187,7 +189,7 @@ class ResearchTool:
                             {v.video_id: asdict(v) for v in state.processed_videos.values()}
                         )
                     }
-                }]
+                }], max_tokens=2000
             )
             
             final_report = report_resp.content.text
