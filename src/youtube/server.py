@@ -42,7 +42,6 @@ def safe_json_serialize(data):
         logger.error(f"Error serializing data to JSON: {str(e)}")
         return json.dumps({"error": "Serialization error"})
 
-
 @server.list_prompts()
 async def handle_list_prompts() -> list[types.Prompt]:
     return [
@@ -96,43 +95,16 @@ Do not use generic terms like "tutorial" or "review" unless specifically relevan
         ],
     )
 
-async def fetch_search_terms_via_prompt(topic: str) -> list[str]:
-    try:
-        get_prompt_resp = await server.request_context.session.send_request(
-            "prompts/get",
-            {
-                "name": "youtube-search-terms",
-                "arguments": {"topic": topic}
-            }
-        )
-
-        sampling_req = {
-            "messages": get_prompt_resp["messages"],
-            "maxTokens": 300
-        }
-
-        sampling_resp = await server.request_context.session.send_request(
-            "sampling/createMessage",
-            sampling_req
-        )
-
-        text_out = ""
-        if isinstance(sampling_resp, dict):
-            text_out = sampling_resp.get("content", {}).get("text", "")
-        elif isinstance(sampling_resp, str):
-            text_out = sampling_resp.strip()
-
-        if not text_out:
-            logger.warning("No text returned for search terms; fallback to basic terms.")
-            return [topic, f"{topic} tutorial"]
-
-        lines = [line.strip() for line in text_out.split("\n") if line.strip()]
-        return lines[:5] if lines else [topic, f"{topic} tutorial"]
-
-    except Exception as e:
-        logger.error(f"fetch_search_terms_via_prompt error: {e}")
-        # fallback
-        return [topic, f"{topic} tutorial"]
+async def generate_search_terms(topic: str) -> list[str]:
+    # Simple keyword-based search term generation
+    search_terms = [
+        f"{topic} tutorial",
+        f"Introduction to {topic}",
+        f"Advanced {topic} techniques",
+        f"Common problems in {topic}",
+        f"Expert insights on {topic}"
+    ]
+    return search_terms
 
 async def youtube_search(youtube, query: str, videoDuration: str = "any", maxResults=10) -> list[str]:
     # A helper function to do a single search call
@@ -192,25 +164,23 @@ async def get_captions(video_id: str) -> str:
 async def handle_youtube_research(topic: str, progress_callback=None) -> tuple[list[dict], list[str]]:
     """
     Steps:
-    1) Get search terms via prompt-based sampling.
+    1) Generate search terms without sampling.
     2) From those search terms:
        - Find short-form candidates (videoDuration=short) and filter top 5 under 1 minute.
-       - Find long-form candidates (videoDuration=any) and filter top 2-3 between 1 and 30 minutes.
+       - Find long-form candidates (videoDuration=any) and filter top 2-3 between 1 and 35 minutes.
     3) Fetch metadata & captions for chosen videos.
     """
     try:
-        search_terms = await fetch_search_terms_via_prompt(topic)
+        search_terms = await generate_search_terms(topic)
         if progress_callback:
             await progress_callback(0.1)
 
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
 
-        # We'll just take the first search term and use it for both short and long queries
-        # or we can combine? Let's try using the first search term for simplicity:
+        # Use the first search term for simplicity
         main_term = search_terms[0] if search_terms else topic
 
         # 2.1) Short-form: under 1 minute => use videoDuration=short
-        # We'll fetch up to 10 short candidates and then filter by actual duration < 60s
         short_candidates = await youtube_search(youtube, main_term, videoDuration="short", maxResults=10)
 
         # get info for them
@@ -224,13 +194,12 @@ async def handle_youtube_research(topic: str, progress_callback=None) -> tuple[l
         if progress_callback:
             await progress_callback(0.4)
 
-        # 2.2) Long-form: between 1 and 35 min => videoDuration=any and then filter by 60-1800s
-        # We'll fetch up to 10 candidates and filter
+        # 2.2) Long-form: between 1 and 35 min => videoDuration=any and then filter by 60-2100s
         long_candidates = await youtube_search(youtube, main_term, videoDuration="any", maxResults=10)
         long_info_tasks = [get_video_info(vid) for vid in long_candidates]
         long_infos = await asyncio.gather(*long_info_tasks)
 
-        # filter top 2-3 with duration between 60 and 1800s
+        # filter top 2-3 with duration between 60 and 2100s (35 minutes)
         long_filtered = [i for i in long_infos if 60 <= i.get('duration', 0) <= 2100]
         long_filtered = long_filtered[:3]
 
@@ -287,23 +256,12 @@ async def handle_call_tool(
             if not arguments or 'topic' not in arguments:
                 raise ValueError("Missing 'topic' argument.")
 
-            async def progress_callback(progress: float):
-                if hasattr(server.request_context.meta, 'progressToken'):
-                    await server.request_context.session.send_notification(
-                        "notifications/progress",
-                        {
-                            "progressToken": server.request_context.meta.progressToken,
-                            "progress": progress,
-                            "total": 1.0
-                        }
-                    )
-
             topic = arguments['topic']
-            results, search_terms = await handle_youtube_research(topic, progress_callback=progress_callback)
+            results, search_terms = await handle_youtube_research(topic, progress_callback=None)
 
             formatted = []
             formatted.append("Search Terms Used:\n" + "\n".join(search_terms) + "\n")
-            formatted.append("Top 5 Videos Under 1 Minute + 2-3 Videos (1-5 min):\n")
+            formatted.append("Top 5 Videos Under 1 Minute + 2-3 Videos (1-35 min):\n")
             for r in results:
                 info = r.get('info', {})
                 title = info.get('title', 'N/A')
@@ -350,7 +308,7 @@ async def main():
                         "tools": {"listChanged": True},
                         "resources": {},
                         "prompts": {"listChanged": True},
-                        "sampling": {}
+                        # Removed "sampling": {}
                     }
                 )
             )
